@@ -1,0 +1,272 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+      system-type: istio
+  template:
+    metadata:
+      labels:
+        app: frontend
+        system-type: istio
+    spec:
+      volumes:
+      - name: opa-config-vol
+        configMap:
+          name: opa-istio-config
+      containers:
+        - name: frontend
+          image: sreenathkk96/frontendreact:0.0.17
+          imagePullPolicy: Always
+          stdin: true
+          tty: true
+          ports:
+            - containerPort: 3000
+          env:
+          - name: REACT_APP_API_URL
+            value: http://10.105.181.23:8080/api/v1/employees  #backend svc ip address 
+          - name: POLICY_PATH
+            value:  /v1/data/application/main
+        - name: opa
+          image: openpolicyagent/opa:0.42.2-envoy-rootless
+          volumeMounts:
+          - readOnly: true
+            mountPath: /config
+            name: opa-config-vol
+          livenessProbe:
+            httpGet:
+              path: /health
+              scheme: HTTP
+              port: 8282
+            initialDelaySeconds: 5      # Tune these periods for your environemnt
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health?bundle=true  # Include bundle activation in readiness
+              scheme: HTTP
+              port: 8282
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          args:
+            - "run"
+            - "--server"
+            - "--ignore=.*"
+            - "--config-file=/config/conf.yaml"
+            - "--authorization=basic"
+            - "--addr=http://127.0.0.1:8181"
+            - "--diagnostic-addr=0.0.0.0:8282"
+      
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  ports:
+  - name: http
+    port: 3000
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app: frontend
+  type: LoadBalancer
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+    
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+      system-type: istio
+  template:
+    metadata:
+      labels:
+        app: backend
+        system-type: istio
+    spec:
+      volumes:
+        - name: opa-config-vol
+          configMap:
+            name: opa-istio-config
+      
+      containers:
+        - name: backend
+          image: sreenathkk96/backendspring:0.0.17
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+        
+          env:
+          - name: DB_SERVER
+            value: mongo
+        - name: opa
+          image: openpolicyagent/opa:0.42.2-envoy-rootless
+          volumeMounts:
+          - readOnly: true
+            mountPath: /config
+            name: opa-config-vol
+          livenessProbe:
+              httpGet:
+                path: /health
+                scheme: HTTP
+                port: 8282
+              initialDelaySeconds: 5    # Tune these periods for your environemnt
+              periodSeconds: 5
+          readinessProbe:
+               httpGet:
+                 path: /health?bundle=true # Include bundle activation in readiness
+                 scheme: HTTP
+                 port: 8282
+               initialDelaySeconds: 5
+               periodSeconds: 5
+          args:
+            - "run"
+            - "--server"
+            - "--ignore=.*"
+            - "--config-file=/config/conf.yaml"
+            - "--authorization=basic"
+            - "--addr=http://127.0.0.1:8181"
+            - "--diagnostic-addr=0.0.0.0:8282"
+        
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      protocol: TCP
+      targetPort: 8080
+      
+  type: LoadBalancer
+  
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+  labels:
+    app: mongo
+       
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+      system-type: istio
+      
+  template:
+    metadata:
+      labels:
+        app: mongo
+        system-type: istio
+    spec:
+      volumes:
+        - name: opa-config-vol
+          configMap:
+            name: opa-istio-config
+      
+      containers:
+        - name: mongo
+          image: mongo 
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 27017
+        
+        - name: opa
+          image: openpolicyagent/opa:0.42.2-envoy-rootless
+          volumeMounts:
+          - readOnly: true
+            mountPath: /config
+            name: opa-config-vol
+          livenessProbe:
+              httpGet:
+                path: /health
+                scheme: HTTP
+                port: 8282
+              initialDelaySeconds: 5    # Tune these periods for your environemnt
+              periodSeconds: 5
+          readinessProbe:
+               httpGet:
+                 path: /health?bundle=true # Include bundle activation in readiness
+                 scheme: HTTP
+                 port: 8282
+               initialDelaySeconds: 5
+               periodSeconds: 5
+          args:
+            - "run"
+            - "--server"
+            - "--ignore=.*"
+            - "--config-file=/config/conf.yaml"
+            - "--authorization=basic"
+            - "--addr=http://127.0.0.1:8181"
+            - "--diagnostic-addr=0.0.0.0:8282"
+        
+            
+            
+---
+ 
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  selector:
+    app: mongo
+  ports:
+    - port: 27017
+      targetPort: 27017
+
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ebook-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: ebook
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - ebook-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: frontend-service
+        port:
+          number: 3000
